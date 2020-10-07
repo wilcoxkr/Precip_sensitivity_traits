@@ -1,0 +1,113 @@
+---
+title: "Stepwise regressions"
+author: "Kevin Wilcox"
+date: "November 27, 2017"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+#setwd("T:\\1-People\\Dana Lab\\TRAITS\\PUBLICATIONS\\precip_sensitivity\\")
+#setwd("C:\\Users\\kwilcox4\\Dropbox\\Cross_workstation_workspace\\Current projects\\precip_sensitivity\\")
+setwd("C:\\Users\\wilco\\OneDrive - University of Wyoming\\Cross_workstation_workspace\\Current projects\\precip_sensitivity\\data\\")
+
+library(MASS)
+library(tidyverse)
+library(ggthemes)
+library(gridExtra)
+library(car)
+library(vegan)
+
+source("..//scripts//02_compile ppt sens_traits_cluster.R")
+rm(list=setdiff(ls(),"full_df"))
+```
+
+### Identify lists of traits
+## economic, drought, grazing and full lists
+```{r identify traits}
+
+trait_vec_all <- c(
+  "LogSLA",
+  "LogLfN",
+  "SqrtLfP",
+  "SqrtStemSpecDens",
+  "LogLfOsmPot",
+  "LogLfThickness",
+  "LogLDMC",
+  "LogIndLfArea",
+  "SqrtPubescence",
+  "SqrtHeight"
+
+)
+
+### Create long dataframe
+df_all_long <- full_df %>%
+  dplyr::select(Species:life_form, trait_vec_all) %>%
+  drop_na() %>%
+  gather(key=trait_name, value=trait_value, -(Species:life_form))
+
+df_13C_long <- full_df %>%
+  dplyr::select(Species:life_form, LogLf13C) %>%
+  drop_na() %>%
+  gather(key=trait_name, value=trait_value, -(Species:life_form)) %>%
+  filter(trait_name=="LogLf13C") %>%
+  mutate(photo_path= ifelse(trait_value<1, "C4", "C3")) %>%
+  mutate(photo_path=factor(photo_path, levels=c("C4","C3")))
+
+```
+
+
+### 1. Main trait-sensitivity models
+Loops through traits
+```{r stepwise from full}
+
+trait_vec <- unique(df_all_long$trait_name)
+
+main_effects_out <- {}
+
+for(trait in 1:length(trait_vec)){
+  df_temp <- subset(df_all_long, trait_name==trait_vec[trait])
+  weights_temp <- 1/df_temp$ppt_slope_se
+  model_temp <- lm(ppt_slope ~ trait_value, weights= weights_temp, data=df_temp)
+  model_summary <- summary(model_temp)
+  model_anova <- Anova(model_temp, type=3)
+
+  out_temp <- data.frame(
+    trait_name = trait_vec[trait],
+    P_value = model_anova$`Pr(>F)`[2],
+    df_num = model_anova$Df[2],
+    df_den = model_anova$Df[3],
+    F_value = model_summary$fstatistic[1],
+    R_2 = model_summary$r.squared
+  )
+  
+  main_effects_out <- rbind(main_effects_out, out_temp)
+}
+
+### delta C13 - senstiviity models split by C3 and C4
+  
+  weights_d13 <- 1/df_13C_long$ppt_slope_se
+  model_d13 <- lm(ppt_slope ~ trait_value + photo_path, weights= weights_d13, data=df_13C_long)
+  model_summary <- summary(model_d13)
+  model_anova <- Anova(model_d13, type=3)
+
+  out_d13 <- data.frame(
+    trait_name = "LogLf13C",
+    P_value = model_anova$`Pr(>F)`[2],
+    df_num = model_anova$Df[2],
+    df_den = model_anova$Df[4],
+    F_value = model_summary$fstatistic[1],
+    R_2 = model_summary$r.squared
+  )
+  
+  main_effects_out <- rbind(main_effects_out, out_d13)
+
+### Calculate r (need to correct signs of r values)
+  main_effects_out$r <- sqrt(main_effects_out$R_2)
+
+  write.csv(main_effects_out, file=paste0("output//trait-sensitivity main effect output",Sys.Date(),".csv"), row.names=F)  
+  
+```

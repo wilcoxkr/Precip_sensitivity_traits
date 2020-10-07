@@ -136,15 +136,8 @@ for(j in 1:length(trt_grp_vec)){
   }
 }
 
-# ### standardized slopes
-# Sens_out_rel_slopes <- ltgi_pasture_sp_cover_ppt %>%
-#   group_by(trt_grp, species) %>%
-#   summarise(abs_cover=mean(abs_cover,na.rm=T)) %>%
-#   right_join(Sens_out_water_year, by=c("species"="Species", "trt_grp")) %>%
-#   dplyr::select(trt_grp, species, abs_cover, abs_cover, Slope, Slope_se)
 
-
-### Calculate mean slopes across trt_grp
+### Calculate mean slopes across trt_grp for Table 1.
 ## Average senstivities across trt_grp
 mean_sens_rel <- Sens_out_water_year %>%
   rename(species=Species) %>%
@@ -154,114 +147,4 @@ mean_sens_rel <- Sens_out_water_year %>%
   mutate(rownum=1:length(levels(factor(Sens_out_water_year$Species))))
 
 
-###
-### Calculate maximum frequency for weighting
-###
-max_sp_freq <- ltgi_cover_full %>%
-  gather(key=species, value=abs_cover, -Year, -Pasture, -Transect, -Plot, -Treatment, -trt_grp) %>%
-  filter(abs_cover != 0) %>%
-  group_by(Year, species) %>%
-  summarize(annual_freq = length(abs_cover)) %>%
-  ungroup() %>%
-  group_by(species) %>%
-  summarize(max_freq = max(annual_freq)) %>%
-  ungroup() %>%
-  filter(species %in% sp_keepers_cper)
 
-###
-### Visualize relativized sensitivity values and slopes
-###
-
-### Plot sensitivity values and SE's
-ggplot(mean_sens_rel, aes(x=reorder(species, -rel_slope_mean), y=rel_slope_mean)) +
-  geom_hline(yintercept=0, col="grey")+
-  geom_bar(stat="identity", fill="darkgrey", col="black")+
-  #  geom_vline(aes(xintercept=rownum),col="darkgrey")+
-  geom_errorbar(aes(x=reorder(species, -rel_slope_mean), ymin=rel_slope_mean-rel_slope_se_mean, ymax=rel_slope_mean+rel_slope_se_mean, width=0.2)) +
-  theme_bw()+
-  theme(axis.text.x=element_text(angle=45,hjust=1))+
-  xlab("Species code")+
-  ylab("Precipitation sensitivity") +
-  ggtitle("PPT sensitivity averaged across trt_grp +/- standard error_standardized cover values")
-#ggsave(file=paste0("figures/sensitivity bar plot", Sys.Date(), ".pdf"), height=4, width=7)
-
-### Plot regressions (standardized cover values)
-ggplot(filter(ltgi_pasture_sp_cover_ppt, species %in% sp_vec), aes(x=water_year_ppt, y=abs_cover_pchange, col=trt_grp)) +
-  geom_point() +
-  geom_smooth(method="lm") +
-  facet_wrap(~species, scales="free") +
-  theme_few()
-#ggsave(file=paste0("figures/sensitivity regressions", Sys.Date(), ".pdf"), height=9, width=9)
-
-### Plot weighting values
-# ggplot(max_sp_freq, aes(x=reorder(species, -max_freq), y=max_freq)) +
-#   geom_bar(stat="identity") +
-#   geom_hline(yintercept=0, col="grey")+
-#   theme_bw()+
-#   theme(axis.text.x=element_text(angle=45,hjust=1))+
-#   xlab("Species code")+
-#   ylab("Maximum plot-level frequency") +
-#   ggtitle("Maximum frequency of species occurance in Daubenmire plots -- across all pastures")
-# 
-
-
-rm(i,j,sp_exclude,sp_keepers_cper,sp_vec,num_nonzeros,sum_covers,sp_with_traits,ppt_water_year,
-   plots_2_exclude,no_cover_sp,ltgi_pasture_tot_cover_ppt,ltgi_pasture_sp_cover_ppt,ltgi_cover_full,trt_grp_vec)
-
-#write.csv(mean_sens_rel, file=paste0("output\\Table 1_sensitivity values from standardized covers",Sys.Date(),".csv"), row.names=F)
-
-
-
-
-###
-### Testing difference between slopes of different grazing treatments
-###
-
-# Sens_testing_btwn_trts <- Sens_out_rel_slopes %>%
-#   dplyr::select(trt_grp, species, rel_slope) %>%
-#   spread(key=trt_grp, value=rel_slope) %>%
-#   left_join(dplyr::select(mean_sens_rel, species, rel_slope_se_mean),
-#             by="species")
-# 
-# ggplot(filter(Sens_testing_btwn_trts,species %in% sp_for_regression), aes(ULG, MHG, label=species, size=1/rel_slope_se_mean)) +
-#   geom_point(size=3) +
-#   geom_smooth(method="lm") +
-#   geom_text()
-# 
-# summary(lm(ULG~MHG, data=Sens_testing_btwn_trts, weights=1/rel_slope_se_mean))
-# 
-# species_covers <- ltgi_pasture_sp_cover_ppt %>%
-#   group_by(species, trt_grp) %>%
-#   summarize(abs_cover = mean(abs_cover, na.rm=T)) %>%
-#   spread(key=trt_grp, value=abs_cover)
-# 
-# species_covers2 <- ltgi_pasture_sp_cover_ppt %>%
-#   group_by(species) %>%
-#   summarize(abs_cover = mean(abs_cover, na.rm=T)) %>%
-#   arrange(desc(abs_cover))
-# 
-# sp_for_regression <- species_covers2 %>%
-#   filter(species != "OPPO") %>%
-#   filter(abs_cover >= 1) %>%
-#   pull(species)
-#   
-# filter(species_covers, species %in% sp_for_regression)
-
-# ### PLOTTING ###
-# Sens_out_rel_slopes$trt_grp <- factor(Sens_out_rel_slopes$trt_grp, levels=c("ULG","MHG"))
-# 
-# ### regressions
-# ggplot(subset(ltgi_pasture_sp_cover_ppt, species %in% sp_keepers_cper), aes(x=water_year_ppt, y=abs_cover, col=trt_grp)) +
-#   geom_point(size=2) +
-#   stat_smooth(method="lm",se=F) +
-#   theme_few() +
-#   facet_wrap(~species, scales="free")
-# ### bar plot
-# ggplot(Sens_out_rel_slopes, aes(x=trt_grp, y=rel_slope, ymin=rel_slope-rel_slope_se, ymax=rel_slope+rel_slope_se)) +
-#   geom_bar(stat="identity") +
-#   geom_errorbar(width=.1) +
-#   theme_few() +
-#   facet_wrap(~species)
-# 
-# ## Averaged across trt_grps (barplots)
-# 
