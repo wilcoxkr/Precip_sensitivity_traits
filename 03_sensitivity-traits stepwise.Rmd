@@ -1,0 +1,174 @@
+---
+title: "Stepwise regressions"
+author: "Kevin Wilcox"
+date: "November 27, 2017"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+#setwd("T:\\1-People\\Dana Lab\\TRAITS\\PUBLICATIONS\\precip_sensitivity\\")
+#setwd("C:\\Users\\kwilcox4\\Dropbox\\Cross_workstation_workspace\\Current projects\\precip_sensitivity\\")
+setwd("C:\\Users\\wilco\\OneDrive - University of Wyoming\\Cross_workstation_workspace\\Current projects\\precip_sensitivity\\data\\")
+
+library(tidyverse)
+library(ggthemes)
+library(gridExtra)
+library(car)
+library(vegan)
+library(MASS)
+library(fmsb)
+
+source("..//scripts//02_compile ppt sens_traits_cluster.R")
+rm(list=setdiff(ls(),"full_df"))
+```
+
+### Sspp square root transformation
+```{r sqrt transformation}
+full_df <- full_df %>%
+  filter(!is.na(ppt_slope)) %>%
+  mutate(ppt_slope_sqrt = sqrt(ppt_slope + abs(min(ppt_slope)) + .001) )
+```
+
+
+### Identify lists of traits
+## economic, drought, grazing and full lists
+```{r identify traits}
+trait_vec_all <- c(
+  "LogSLA",
+  "LogLfN",
+  "SqrtLfP",
+  "SqrtStemSpecDens",
+  "LogLfOsmPot",
+  "LogLfThickness",
+  "LogLDMC",
+  "LogIndLfArea",
+  "SqrtPubescence",
+  "SqrtHeight"
+
+)
+
+### Create dataframes
+df_all <- full_df %>%
+  dplyr::select(Species:life_form, trait_vec_all, ppt_slope_sqrt) %>%
+  drop_na()
+
+df_all_long <- df_all %>%
+  gather(key=trait_name, value=trait_value, -(Species:life_form),-ppt_slope_sqrt)
+
+ggplot(df_all_long, aes(x=trait_value, y=ppt_slope_sqrt, size=1/ppt_slope_se)) +
+  geom_point(pch=21) +
+  facet_wrap(~trait_name, scales="free")
+
+ldmc_model <- lm(ppt_slope ~ SqrtStemSpecDens, data=df_all)
+
+plot(predict(ldmc_model), resid(ldmc_model))
+
+```
+
+
+### No life form or functional groupings in model
+### 1. stepwise model selection from full trait dataset
+Includes backwards, forwards, and mixed methods
+```{r stepwise from full}
+
+### Specify models
+all_weights <- 1/df_all$ppt_slope_se
+all_lm_full <- lm(ppt_slope_sqrt ~ ., 
+             weights=all_weights, 
+             data=dplyr::select(df_all, ppt_slope_sqrt, trait_vec_all))
+all_lm_base <- lm(ppt_slope_sqrt ~ 1, 
+                   weights=all_weights,
+                   data=dplyr::select(df_all, ppt_slope_sqrt, trait_vec_all))
+# all_lm_full <- lm(ppt_slope ~ .,  ## NO TRANSFORMATION
+#              weights=all_weights, 
+#              data=dplyr::select(df_all, ppt_slope, trait_vec_all))
+# all_lm_base <- lm(ppt_slope ~ 1, ## NO TRANSFORMATION
+#                    weights=all_weights,
+#                    data=dplyr::select(df_all, ppt_slope, trait_vec_all))
+
+# Check for variance across magnitude of predicted values
+plot(predict(all_lm_full), resid(all_lm_full))
+
+### backwards stepwise
+all_back_step <- stepAIC(all_lm_full, direction = "backward")
+summary(all_back_step)
+
+## Forwards stepwise model  
+all_forward_step <- stepAIC(all_lm_base,
+                                 scope=~.
+                                  +LogSLA
+                                  +LogLfN
+                                  +SqrtLfP
+                                  +SqrtStemSpecDens
+                                  +LogLfOsmPot
+                                  +LogLfThickness
+                                  +LogLDMC
+                                  +LogIndLfArea
+                                  +SqrtPubescence
+                                  +SqrtHeight,
+                                 direction = "forward")
+summary(all_forward_step)
+
+## Forwards & backwards stepwise model selection from full trait set 
+all_both_step <- stepAIC(all_lm_full, direction = "both")
+summary(all_both_step)
+
+### TAke a look at variance inflation factors
+
+## Variance inflation factors on final model
+VIF(all_both_step)
+
+## Assess variance inflation factors on second and third best models
+all_second_best_model <- lm(ppt_slope_sqrt ~ LogSLA + SqrtLfP + LogLDMC, 
+             weights=all_weights, 
+             data=dplyr::select(df_all, ppt_slope_sqrt, trait_vec_all))
+
+all_third_best_model <- lm(ppt_slope_sqrt ~ LogSLA + SqrtLfP + LogLfN + LogLDMC, 
+             weights=all_weights, 
+             data=dplyr::select(df_all, ppt_slope_sqrt, trait_vec_all))
+
+
+car::vif(all_second_best_model)
+car::vif(all_third_best_model)
+car::vif(all_both_step)
+#AIC(all_forward_step)
+```
+
+## 2. Make a table with all stepwise terms and p values
+```{r make a table}
+### all trait sets
+all_back_step_out <- data.frame(trait_set="all",
+                                step_direction="back",
+                                source=c(names(all_back_step$coefficients)[-1],"adj_r2","AIC"),
+                                stat=c(Anova(all_back_step,type=3)$Pr[c(-1,-length(Anova(all_back_step,type=3)$Pr))],
+                                        adj_r2=summary(all_back_step)$adj.r.squared,
+                                        AIC=AIC(all_back_step)))
+
+all_forward_step_out <- data.frame(trait_set="all",
+                                step_direction="forward",
+                                source=c(names(all_forward_step$coefficients)[-1],"adj_r2","AIC"),
+                                stat=c(Anova(all_forward_step,type=3)$Pr[c(-1,-length(Anova(all_forward_step,type=3)$Pr))],
+                                        adj_r2=summary(all_forward_step)$adj.r.squared,
+                                        AIC=AIC(all_forward_step)))
+
+all_both_step_out <- data.frame(trait_set="all",
+                                step_direction="both",
+                                source=c(names(all_both_step$coefficients)[-1],"adj_r2","AIC"),
+                                stat=c(Anova(all_both_step,type=3)$Pr[c(-1,-length(Anova(all_both_step,type=3)$Pr))],
+                                        adj_r2=summary(all_both_step)$adj.r.squared,
+                                        AIC=AIC(all_both_step)))
+
+step_out_all <- rbind(
+                      all_back_step_out,
+                      all_forward_step_out,
+                      all_both_step_out
+                      ) %>%
+  spread(key=source, value=stat)
+
+print(step_out_all)
+
+```

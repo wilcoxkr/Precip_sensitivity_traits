@@ -1,0 +1,374 @@
+---
+title: "Exploring functional group dynamics"
+author: "Kevin Wilcox"
+date: "November 30, 2017"
+output: 
+  html_document: 
+    fig_height: 10
+    fig_width: 12
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+#setwd("T:\\1-People\\Dana Lab\\TRAITS\\PUBLICATIONS\\precip_sensitivity\\")
+setwd("C:\\Users\\wilco\\OneDrive - University of Wyoming\\Cross_workstation_workspace\\Current projects\\precip_sensitivity\\")
+
+library(tidyverse)
+library(ggthemes)
+library(car)
+library(MASS)
+library(abind)
+
+source("scripts//02_compile ppt sens_traits_cluster.R")
+rm(list=setdiff(ls(),"full_df"))
+```
+
+### Sspp square root transformation
+```{r sqrt transformation}
+full_df <- full_df %>%
+  filter(!is.na(ppt_slope)) %>%
+  mutate(ppt_slope_sqrt = sqrt(ppt_slope + abs(min(ppt_slope)) + .001) )
+
+```
+
+### I. Run individual trait models with fxn group and life form terms and interactions
+Loops through each trait
+```{r models with fxn and life form}
+### put data in long form
+full_df_long <- full_df %>%
+  gather(key=trait_name,value=trait_value,-(Species:life_form), -ppt_slope_sqrt)
+
+trait_vec <- unique(full_df_long$trait_name) ## vector of traits to cycle through
+
+model_out <- {} ## set up data frame to fill with model output
+vif_out <- {} ## data frame to fill with variance inflation factors
+
+for(trait in 1:length(trait_vec)){ # loop through traits
+
+  df_trait_temp <- full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name==trait_vec[trait])
+  
+  # run model with all clusters together
+  ppt_weights_temp <- 1/df_trait_temp$ppt_slope_se
+  
+  ppt_model_temp <- lm(ppt_slope ~ trait_value*fxn_grp + trait_value*life_form, weights=ppt_weights_temp, data=df_trait_temp)
+
+  ppt_summary <- summary(ppt_model_temp) 
+  ppt_anova <- Anova(ppt_model_temp,type=3) 
+  
+  ppt_out_temp <- data.frame(Trait_name=trait_vec[trait],
+                             Source=rownames(ppt_anova),
+                             Df=ppt_anova$Df,
+                             F_value=ppt_anova$`F value`,
+                             P_value=ppt_anova$`Pr(>F)`,
+                             mod_R2=ppt_summary$adj.r.squared,
+                             AIC=AIC(ppt_model_temp))
+  vif_out_temp <- data.frame(car::vif(ppt_model_temp), Trait_name=trait_vec[trait])
+  model_out <- rbind(model_out, ppt_out_temp)
+  vif_out <- rbind(vif_out, vif_out_temp)
+#  print(plot(predict(ppt_model_temp), resid(ppt_model_temp), main=paste(trait_vec[trait])))
+}
+
+print(model_out)
+filter(model_out, P_value<0.1)
+
+#write.csv(model_out, file=paste0("output//trait-sensitivity models by fxn grp and life form",Sys.Date(),".csv"),row.names=F)
+```
+
+### II. Plotting sensitivity-trait relationships
+Overall regressions and split by life form and functional groups
+```{r plotting}
+### plot with life form and fxn group
+ggplot(full_df_long, aes(x=trait_value, y=ppt_slope, size=1/ppt_slope_se)) +
+  geom_point(aes(x=trait_value, y=ppt_slope, pch=fxn_grp, col=life_form), alpha=0.7) +
+  stat_smooth(method="lm",se=F) +
+  theme_few() + 
+  facet_wrap(~trait_name, scales="free")
+
+### plot with just life form (and trendlines to fit)
+ggplot(full_df_long, aes(x=trait_value, y=ppt_slope, size=1/ppt_slope_se, col=life_form)) +
+  geom_point(alpha=0.7) +
+  stat_smooth(method="lm",se=F) +
+  theme_few() + 
+  facet_wrap(~trait_name, scales="free")
+
+### plot with just fxn group (and trendlines to fit)
+ggplot(full_df_long, aes(x=trait_value, y=ppt_slope, size=1/ppt_slope_se, col=fxn_grp)) +
+  geom_point(alpha=0.7) +
+  stat_smooth(method="lm",se=F) +
+  theme_few() + 
+  facet_wrap(~trait_name, scales="free")
+
+```
+
+### III. Run individual trait models with fxn group and life form terms and interactions
+Loops through each trait
+```{r model loop without fxn group}
+trait_vec <- unique(full_df_long$trait_name) ## vector of traits to cycle through
+
+model_out <- {} ## set up data frame to fill with model output
+
+for(trait in 1:length(trait_vec)){ # loop through traits
+
+  df_trait_temp <- full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name==trait_vec[trait])
+  
+  # run model with all clusters together
+  ppt_weights_temp <- 1/df_trait_temp$ppt_slope_se
+  
+  ppt_model_temp <- lm(ppt_slope ~ trait_value*life_form + trait_value*fxn_grp, weights=ppt_weights_temp, data=df_trait_temp)
+
+  ppt_summary <- summary(ppt_model_temp) 
+  ppt_anova <- Anova(ppt_model_temp,type=3) 
+  
+  ppt_out_temp <- data.frame(Trait_name=trait_vec[trait],
+                             Source=rownames(ppt_anova),
+                             Df=ppt_anova$Df,
+                             F_value=ppt_anova$`F value`,
+                             P_value=ppt_anova$`Pr(>F)`,
+                             mod_R2=ppt_summary$adj.r.squared,
+                             AIC=AIC(ppt_model_temp))
+
+  model_out <- rbind(model_out, ppt_out_temp)
+}
+
+print(model_out)
+filter(model_out, P_value<0.1)
+
+#write.csv(model_out, file=paste0("output//trait-sensitivity models by life form",Sys.Date(),".csv"),row.names=F)
+ 
+```
+
+### IV. Run individual trait models with fxn and life form_Stepwise selection
+### RESULTS FROM THIS SECTION USED FOR TABLE 2
+Loops through each trait
+```{r stepwise selection}
+trait_vec <- unique(full_df_long$trait_name) ## vector of traits to cycle through
+
+model_out_step <- {} ## set up data frame to fill with model output
+#vif_out_step <- {} ## Set up data frame for VIF
+
+for(trait in 1:length(trait_vec)){ # loop through traits
+  print(trait_vec[trait])
+  df_trait_temp <- full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name==trait_vec[trait])
+  
+  # run model with all clusters together
+  ppt_weights_temp <- 1/df_trait_temp$ppt_slope_se
+  
+  ppt_model_temp <- lm(ppt_slope ~ trait_value*life_form + trait_value*fxn_grp, weights=ppt_weights_temp, data=df_trait_temp)
+   
+  step_model_temp <- stepAIC(ppt_model_temp)
+  step_summary <- summary(step_model_temp) 
+  step_anova <- Anova(step_model_temp,type=3)
+
+    model_out_step_temp <- data.frame(Trait_name=trait_vec[trait],
+                             Source=rownames(step_anova),
+                             Df=step_anova$Df,
+                             F_value=step_anova$`F value`,
+                             P_value=step_anova$`Pr(>F)`,
+                             mod_R2=step_summary$adj.r.squared,
+                             AIC=AIC(step_model_temp))
+
+  model_out_step <- rbind(model_out_step, model_out_step_temp)
+#  vif_out_object_temp <- car::vif(step_model_temp)
+#  vif_out_temp_step <- data.frame(car::vif(step_model_temp), Trait_name=trait_vec[trait])
+  model_out <- rbind(model_out, ppt_out_temp)
+#  vif_out_step <- abind(vif_out_step, vif_out_temp_step, along=3)
+}
+
+print(model_out_step)
+filter(model_out_step, P_value<0.1)
+
+#write.csv(model_out_step, file=paste0("output//trait-sensitivity models_life form and fxn_best stepwise",Sys.Date(),".csv"),row.names=F)
+ 
+### Run d13C for just C3 species
+  df_trait_LogLf13C <- full_df_long %>%
+    filter(trait_name=="LogLf13C") %>%
+    filter(trait_value>1) ## there's a gap from about 0.8 (below which are C4 species) to about 1.25 (above which are all C3 species) 
+
+  ppt_weights_LogLf13C <- 1/df_trait_LogLf13C$ppt_slope_se
+  
+  ppt_model_LogLf13C <- lm(ppt_slope ~ trait_value*life_form + trait_value*fxn_grp, weights=ppt_weights_LogLf13C, data=df_trait_LogLf13C)
+   
+  step_model_LogLf13C <- stepAIC(ppt_model_LogLf13C)
+  step_summary <- summary(step_model_LogLf13C) 
+  step_anova <- Anova(step_model_temp,type=3)
+
+    model_out_step_LogLf13C <- data.frame(Trait_name=trait_vec[trait],
+                             Source=rownames(step_anova),
+                             Df=step_anova$Df,
+                             F_value=step_anova$`F value`,
+                             P_value=step_anova$`Pr(>F)`,
+                             mod_R2=step_summary$adj.r.squared,
+                             AIC=AIC(step_model_LogLf13C))
+
+  model_out_step <- rbind(model_out_step, model_out_step_temp)
+#  vif_out_object_temp <- car::vif(step_model_temp)
+#  vif_out_temp_step <- data.frame(car::vif(step_model_temp), Trait_name=trait_vec[trait])
+  model_out <- rbind(model_out, ppt_out_temp)
+
+
+## Ran through models individually to generate VIF for stepwise selected models, saved output manually in excel... which was annoying
+  df_trait_temp <- full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name==trait_vec[trait])
+  
+  # run model with all clusters together
+  ppt_weights_temp <- 1/df_trait_temp$ppt_slope_se
+  ppt_model_temp <- lm(ppt_slope ~ trait_value*life_form + trait_value*fxn_grp, weights=ppt_weights_temp, data=df_trait_temp)
+  step_model_temp <- stepAIC(ppt_model_temp)
+  data.frame(car::vif(step_model_temp), Trait_name=trait_vec[trait])
+
+### run second-best models (where AIC was within 2 of best model) to get P values for these "second best" terms
+  df_LogLfN <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="LogLfN")
+  weights_LogLfN <- 1/df_LogLfN$ppt_slope_se
+  LogLfN_model_2 <- lm(ppt_slope ~ trait_value + life_form + trait_value*life_form, weights=weights_LogLfN, data=df_LogLfN)
+  Anova(LogLfN_model_2, type=3)   
+
+  df_SqrtLfP <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="SqrtLfP")
+  weights_SqrtLfP <- 1/df_SqrtLfP$ppt_slope_se
+  SqrtLfP_model_2 <- lm(ppt_slope ~ trait_value + life_form, weights=weights_SqrtLfP, data=df_SqrtLfP)
+  Anova(SqrtLfP_model_2, type=3)   
+
+  df_LogLfOsmPot <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="LogLfOsmPot")
+  weights_LogLfOsmPot <- 1/df_LogLfOsmPot$ppt_slope_se
+  LogLfOsmPot_model_2 <- lm(ppt_slope ~ trait_value*life_form + trait_value*fxn_grp, weights=weights_LogLfOsmPot, data=df_LogLfOsmPot)
+  Anova(LogLfOsmPot_model_2, type=3)   
+
+  df_LogLDMC <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="LogLDMC") 
+  weights_LogLDMC <- 1/df_LogLDMC$ppt_slope_se
+  LogLDMC_model_2 <- lm(ppt_slope ~ trait_value + life_form + trait_value*life_form, weights=weights_LogLDMC, data=df_LogLDMC)
+  Anova(LogLDMC_model_2, type=3)   
+
+  df_LogLf13C <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="LogLf13C")%>%
+    filter(trait_value > 1)
+  weights_LogLf13C <- 1/df_LogLf13C$ppt_slope_se
+  LogLf13C_model_2 <- lm(ppt_slope ~ trait_value*life_form + trait_value*fxn_grp, weights=weights_LogLf13C, data=df_LogLf13C)
+  Anova(LogLf13C_model_2, type=3)   
+
+  df_LogLfThickness <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="LogLfThickness")
+  weights_LogLfThickness <- 1/df_LogLfThickness$ppt_slope_se
+  LogLfThickness_model_2 <- lm(ppt_slope ~ trait_value*life_form + trait_value*fxn_grp, weights=weights_LogLfThickness, data=df_LogLfThickness)
+  Anova(LogLfThickness_model_2, type=3)   
+
+  df_SqrtHeight <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="SqrtHeight")
+  weights_SqrtHeight <- 1/df_SqrtHeight$ppt_slope_se
+  SqrtHeight_model_2 <- lm(ppt_slope ~ trait_value + life_form + trait_value*life_form + fxn_grp, weights=weights_SqrtHeight, data=df_SqrtHeight)
+  Anova(SqrtHeight_model_2, type=3)   
+
+  df_LogIndLfArea <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="LogIndLfArea")
+  weights_LogIndLfArea <- 1/df_LogIndLfArea$ppt_slope_se
+  LogIndLfArea_model_2 <- lm(ppt_slope ~ trait_value + life_form + trait_value*life_form, weights=weights_LogIndLfArea, data=df_LogIndLfArea)
+  Anova(LogIndLfArea_model_2, type=3)   
+
+  df_SqrtStemSpecDens <-  full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="SqrtStemSpecDens")
+  weights_SqrtStemSpecDens <- 1/df_SqrtStemSpecDens$ppt_slope_se
+  SqrtStemSpecDens_model_2 <- lm(ppt_slope ~ trait_value*life_form + trait_value*fxn_grp, weights=weights_SqrtStemSpecDens, data=df_SqrtStemSpecDens)
+  Anova(SqrtStemSpecDens_model_2, type=3)   
+
+```
+
+### VIII. Split models with significant interactions by life form
+```{r Split by life form}
+
+  df_pubescence_annual <- full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="SqrtPubescence" & life_form=="Annual")
+  df_pubescence_perennial <- full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="SqrtPubescence" & life_form=="Perennial")
+  
+  # run model with all clusters together
+  weights_pubescence_annual <- 1/df_pubescence_annual$ppt_slope_se
+  weights_pubescence_perennial <- 1/df_pubescence_perennial$ppt_slope_se
+  
+  pubescence_annual_model <- lm(ppt_slope ~ trait_value, weights=weights_pubescence_annual, data=df_pubescence_annual)
+  summary(pubescence_annual_model)
+coef(summary(pubescence_annual_model))[2,1] - confint(pubescence_annual_model)[2,1]
+  pubescence_perennial_model <- lm(ppt_slope ~ trait_value, weights=weights_pubescence_perennial, data=df_pubescence_perennial)
+  summary(pubescence_perennial_model)
+  confint(pubescence_perennial_model)
+coef(summary(pubescence_perennial_model))[2,1] - confint(pubescence_perennial_model)[2,1]
+
+  df_height_annual <- full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="SqrtHeight" & life_form=="Annual")
+  df_height_perennial <- full_df_long %>% # create temporary data frame for one trait at a time
+    filter(trait_name=="SqrtHeight" & life_form=="Perennial")
+  
+  # run model with all clusters together
+  weights_height_annual <- 1/df_height_annual$ppt_slope_se
+  weights_height_perennial <- 1/df_height_perennial$ppt_slope_se
+  
+  height_annual_model <- lm(ppt_slope ~ trait_value, weights=weights_height_annual, data=df_height_annual)
+  summary(height_annual_model)
+  coef(summary(height_annual_model))[2,1] - confint(height_annual_model)[2,1]
+  
+  height_perennial_model <- lm(ppt_slope ~ trait_value, weights=weights_height_perennial, data=df_height_perennial)
+  summary(height_perennial_model)
+  coef(summary(height_perennial_model))[2,1] - confint(height_perennial_model)[2,1]
+
+
+### d13C
+  df_d13c_graminoid <- full_df_long %>% 
+    filter(trait_name=="LogLf13C" & fxn_grp=="Graminoid") %>%
+    filter(trait_value>1)
+
+  df_d13c_forb <- full_df_long %>%
+    filter(trait_name=="LogLf13C" & fxn_grp=="Forb") %>%
+    filter(trait_value>1)
+
+  df_d13c_shrub <- full_df_long %>% 
+    filter(trait_name=="LogLf13C" & fxn_grp=="Sshrub") %>%
+    filter(trait_value>1)
+
+  df_d13c_annual <- full_df_long %>% 
+    filter(trait_name=="LogLf13C" & life_form=="Annual") %>%
+    filter(trait_value >1)
+  df_d13c_perennial <- full_df_long %>%
+    filter(trait_name=="LogLf13C" & life_form=="Perennial") %>%
+    filter(trait_value >1)
+
+  
+  ## Run models separate
+  weights_d13c_annual <- 1/df_d13c_annual$ppt_slope_se
+  weights_d13c_perennial <- 1/df_d13c_perennial$ppt_slope_se
+  weights_d13c_graminoid <- 1/df_d13c_graminoid$ppt_slope_se
+  weights_d13c_forb <- 1/df_d13c_forb$ppt_slope_se
+  weights_d13c_shrub <- 1/df_d13c_shrub$ppt_slope_se
+  
+  d13c_annual_model <- lm(ppt_slope ~ trait_value, weights=weights_d13c_annual, data=df_d13c_annual)
+  summary(d13c_annual_model)
+  coef(summary(d13c_annual_model))[2,1] - confint(d13c_annual_model)[2,1]
+  
+  d13c_perennial_model <- lm(ppt_slope ~ trait_value, weights=weights_d13c_perennial, data=df_d13c_perennial)
+  summary(d13c_perennial_model)
+  coef(summary(d13c_perennial_model))[2,1] - confint(d13c_perennial_model)[2,1]
+
+  d13c_graminoid_model <- lm(ppt_slope ~ trait_value, weights=weights_d13c_graminoid, data=df_d13c_graminoid)
+  summary(d13c_graminoid_model)
+  coef(summary(d13c_graminoid_model))[2,1] - confint(d13c_graminoid_model)[2,1]
+
+    d13c_forb_model <- lm(ppt_slope ~ trait_value, weights=weights_d13c_forb, data=df_d13c_forb)
+  summary(d13c_forb_model)
+  coef(summary(d13c_forb_model))[2,1] - confint(d13c_forb_model)[2,1]
+
+    d13c_shrub_model <- lm(ppt_slope ~ trait_value, weights=weights_d13c_shrub, data=df_d13c_shrub)
+  summary(d13c_shrub_model)
+  coef(summary(d13c_shrub_model))[2,1] - confint(d13c_shrub_model)[2,1]
+  
+  ggplot(filter(full_df,LogLf13C>1), aes(x=LogLf13C, y=ppt_slope, col=fxn_grp)) + 
+    geom_point() +
+    geom_smooth(method="lm",se=F) +
+    theme_few()
+
+```
